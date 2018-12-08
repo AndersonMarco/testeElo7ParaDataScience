@@ -7,6 +7,9 @@ from sklearn.model_selection import KFold
 from sklearn.svm import SVC
 from sklearn import neighbors
 from sklearn.neural_network import MLPClassifier
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 import random
 import tensorflow as tf
 import sys
@@ -35,11 +38,39 @@ def selectInDataBase(sqlConnection, select):
         ret.append(line)
     return ret
 
+def getPCAsAppliedAtGenres(mydb,idGenre):
+    sql="""SELECT valuesdata, relation_movie_genre.idmovie FROM genome_scores_at_one_line
+       inner join relation_movie_genre on relation_movie_genre.idmovie=genome_scores_at_one_line.idmovie
+       where relation_movie_genre.idgenre={d0};""".replace("\n"," ").format(d0=idGenre)
+
+
+    genome_scoresAtSqlSelect=selectInDataBase(mydb,sql)
+
+    genome_scores=np.zeros((len(genome_scoresAtSqlSelect),len(genome_scoresAtSqlSelect[0]['valuesdata'].split(","))))
+
+    converterPostionAtGenome_scoresToIdMovie={}
+    converterIdMovieToPostionAtGenome_scores={}
+    for i in range(len(genome_scoresAtSqlSelect)):
+        lineForGenomeScore=list(csv.reader([genome_scoresAtSqlSelect[i]['valuesdata']]))[0]
+        genome_scores[i]=np.array(lineForGenomeScore,dtype=np.float)
+        converterPostionAtGenome_scoresToIdMovie[i]=genome_scoresAtSqlSelect[i]['idmovie']
+        converterIdMovieToPostionAtGenome_scores[genome_scoresAtSqlSelect[i]['idmovie']]=i
+
+    X=genome_scores
+    scaler = StandardScaler()
+    scaler.fit(X)
+    X=scaler.transform(X)    
+    pca = PCA()
+    componentsForObjects = pca.fit_transform(X)
+    pcaRet={}
+    for  i in range(len(genome_scoresAtSqlSelect)):
+        pcaRet[genome_scoresAtSqlSelect[i]['idmovie']]=componentsForObjects[i]
+    return pcaRet
 
 #idGenre=str(sys.argv[1])
-idGenre="1"
+idGenre="9"
 genreName=selectInDataBase(mydb,"SELECT * from genre where idgenre="+idGenre)[0]["name"]
-genomeScoresPCASelect=selectInDataBase(mydb,"SELECT * FROM genome_scores_pca_at_one_line")
+#genomeScoresPCASelect=selectInDataBase(mydb,"SELECT * FROM genome_scores_pca_at_one_line")
 genomeScoresInformation=selectInDataBase(mydb,"SELECT * FROM genome_tags")
 genomeScoresAverage=np.zeros(len(genomeScoresInformation),dtype=np.float32)
 genomeScoresStd=np.zeros(len(genomeScoresInformation),dtype=np.float32)
@@ -49,10 +80,10 @@ for line in genomeScoresInformation:
     genomeScoresStd[i]=line['std']
     i=i+1
 descritorNumber=256
-genomeScoresPCAIndexByMovieId={}
-for line in genomeScoresPCASelect:
-    valuesdata=line['valuesdata']
-    genomeScoresPCAIndexByMovieId[line['idmovie']]=(np.array(list(csv.reader([valuesdata]))[0], dtype=np.float)[:descritorNumber])
+genomeScoresPCAIndexByMovieId=getPCAsAppliedAtGenres(mydb,idGenre)
+#for line in genomeScoresPCASelect:
+#    valuesdata=line['valuesdata']
+#    genomeScoresPCAIndexByMovieId[line['idmovie']]=(np.array(list(csv.reader([valuesdata]))[0], dtype=np.float)[:descritorNumber])
 cursor = mydb.cursor()
 
 nLinesForTrain=50000
@@ -116,7 +147,7 @@ sql = """SELECT ra.rating as rating,ra.idrand as idrand, ra.idmovie as idmovie F
          inner join relation_movie_genre rg  on rg.idmovie=ra.idmovie
          inner join genome_scores_pca_at_one_line gp  on gp.idmovie=ra.idmovie
          where idgenre={d0} and idrand>{d1} order by idrand         
-         limit 500000""".replace("\n"," ").format(d0=idGenre,d1=maxIdrand)
+         limit 50000""".replace("\n"," ").format(d0=idGenre,d1=maxIdrand)
 print(sql)
 print(sql)
 cursor.execute (sql)

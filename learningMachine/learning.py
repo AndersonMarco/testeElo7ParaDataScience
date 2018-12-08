@@ -79,10 +79,10 @@ for k in [7,5]:
     for train_index, test_index in kf.split(descriptors):
         X_train, X_test = descriptors[train_index], descriptors[test_index]
         y_train, y_test = ratings[train_index], ratings[test_index]
-        #clf = tree.DecisionTreeClassifier().fit(X_train, y_train)
+        clf = tree.DecisionTreeClassifier().fit(X_train, y_train)
         #clf = SVC(gamma='scale').fit(X_train, y_train)
         #clf=  neighbors.KNeighborsClassifier(k).fit(X_train,y_train)
-        clf=MLPClassifier(solver='lbfgs', alpha=1e-5,hidden_layer_sizes=(50,80, 20), random_state=1)
+        #clf=MLPClassifier(solver='lbfgs', alpha=1e-5,hidden_layer_sizes=(50,80, 20), random_state=1)
         clf.fit(X_train,y_train)
         unique, counts =np.unique(y_test, return_counts=True)
         
