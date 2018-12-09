@@ -11,6 +11,7 @@ import random
 import sys
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
+import tensorflow as tf
 
 
 def selectInDataBase(sqlConnection, select):
@@ -43,16 +44,15 @@ class Classifier:
 
             self.descriptorsForAllMovies[idmovie]=descriptors
 
-    def execute(self,clfFactory,idUsers):
+    def execute(self,clfFactory,idUsers):        
         progress=0
         acuracy=[]
         acuracyMinusProportionForMajorityClass=[]
         errorToApplyPCA=0
-#        descriptorsNumber=self.descriptorsNumber
-        descriptorsNumber=1024
+        descriptorsNumber=64
         for iduser in idUsers:
             progress=progress+1
-            print("number of users processed: {d0}|{d1}".format(d0=progress,d1=len(idUsers)))
+            print("number of users processed: {d0}|{d1} \n".format(d0=progress,d1=len(idUsers)))
             sys.stdout.flush()            
             
             sqlToKnowLinesReturned = """SELECT count(*) as nLines FROM  ratings r1 
@@ -77,7 +77,7 @@ class Classifier:
             for (idmovie, rating) in cursor:
                 if(idmovie in self.descriptorsForAllMovies):
                     descriptors[currentLine]=np.copy(self.descriptorsForAllMovies[idmovie])[:descriptorsNumber]
-                    ratings[currentLine]=(int(float(rating)*2))        
+                    ratings[currentLine]=(int(float(rating)*2)-1)        
                     currentLine=currentLine+1   
             
             if(currentLine==0):
@@ -93,20 +93,18 @@ class Classifier:
                 X_train,X_test,  = descriptorsForLearningAlgorithm[train_index], descriptorsForLearningAlgorithm[test_index]
                 y_train,y_test  = ratings[train_index], ratings[test_index]                       
                 clf=clfFactory()
-                clf.fit(X_train,y_train)
+                clf.compile(optimizer='adam',loss='sparse_categorical_crossentropy',metrics=['accuracy'])
+                
+                clf.fit(X_train,y_train,epochs=10)
 
                 #get proportion for majority class in test dataset============
                 unique, counts =np.unique(y_test, return_counts=True)
                 proportionForMajorityClass=float(max(counts))/float(sum(counts))            
                 #end==========================================================
 
-                acuracy.append(clf.score(X_test,y_test))
+                acuracy.append(clf.evaluate(X_test,y_test)[1])
                 acuracyMinusProportionForMajorityClass.append(acuracy[len(acuracy)-1]-proportionForMajorityClass) 
-                print("Average for acuracy:"+ str( np.mean(np.array(acuracy,dtype=float))))
-                print("STD for acuracy:"+ str( np.std(np.array(acuracy,dtype=float))))
-                print("Average for (acuracy - proportion for majority class):"+ str( np.mean(np.array(acuracyMinusProportionForMajorityClass,dtype=float))))
-                print("STD for (acuracy - proportion for majority class):"+str( np.std(np.array(acuracyMinusProportionForMajorityClass,dtype=float))))
-                
+
         print("") 
         return {"acuracy":acuracy,"acuracyMinusProportionForMajorityClass":acuracyMinusProportionForMajorityClass,"errorToApplyPCA":errorToApplyPCA}
 
@@ -138,13 +136,16 @@ if __name__ == "__main__":
             users[position1ForUsersList]=users[position2ForUsersList]
             users[position2ForUsersList]=userTemp
     #end==========================================================
-    knnFactory  = lambda : neighbors.KNeighborsClassifier(11)
-#    svcFactory  = lambda : SVC(gamma='scale')
-    svcFactory  = lambda : SVC(degree=3, gamma='auto', kernel='poly')
-    treeFactory = lambda : tree.DecisionTreeClassifier()
-    MLPFactory  = lambda : MLPClassifier(solver='lbfgs', alpha=1e-5,hidden_layer_sizes=(64,128, 64), random_state=1)
+    
+    MLPFactory  = lambda : tf.keras.models.Sequential([tf.keras.layers.Flatten(),
+                                                       tf.keras.layers.Dense(256, activation=tf.nn.relu),                
+                                                       tf.keras.layers.Dense(256, activation=tf.nn.relu),
+                                                       tf.keras.layers.Dense(256, activation=tf.nn.relu),
+                                                       tf.keras.layers.Dropout(0.2),            
+                                                       tf.keras.layers.Dense(10, activation=tf.nn.softmax)
+                                                      ])
     classifier=Classifier(mydb)
-    acuracyInformation=classifier.execute(treeFactory,users[:140])
+    acuracyInformation=classifier.execute(MLPFactory,users[:140])
 
 
     print("Average for acuracy:"+ str( np.mean(np.array(acuracyInformation["acuracy"],dtype=float))))
