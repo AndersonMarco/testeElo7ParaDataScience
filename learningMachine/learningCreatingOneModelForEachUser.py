@@ -12,7 +12,15 @@ import sys
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-
+def shuffleVector(vector):
+    for i in range(len(vector)*4):
+        position1ForUsersList=random.randint(0,len(vector)-1)
+        position2ForUsersList=random.randint(0,len(vector)-1)
+        userTemp=vector[position1ForUsersList]
+        vector[position1ForUsersList]=vector[position2ForUsersList]
+        vector[position2ForUsersList]=userTemp
+    return vector
+        
 def selectInDataBase(sqlConnection, select):
     cursor = sqlConnection.cursor()
     cursor.execute (select)
@@ -49,10 +57,10 @@ class Classifier:
         acuracyMinusProportionForMajorityClass=[]
         errorToApplyPCA=0
 #        descriptorsNumber=self.descriptorsNumber
-        descriptorsNumber=1024
+        descriptorsNumber=64
         for iduser in idUsers:
             progress=progress+1
-            print("number of users processed: {d0}|{d1}".format(d0=progress,d1=len(idUsers)))
+            #print("number of users processed: {d0}|{d1}".format(d0=progress,d1=len(idUsers)))
             sys.stdout.flush()            
             
             sqlToKnowLinesReturned = """SELECT count(*) as nLines FROM  ratings r1 
@@ -101,12 +109,7 @@ class Classifier:
                 #end==========================================================
 
                 acuracy.append(clf.score(X_test,y_test))
-                acuracyMinusProportionForMajorityClass.append(acuracy[len(acuracy)-1]-proportionForMajorityClass) 
-                print("Average for acuracy:"+ str( np.mean(np.array(acuracy,dtype=float))))
-                print("STD for acuracy:"+ str( np.std(np.array(acuracy,dtype=float))))
-                print("Average for (acuracy - proportion for majority class):"+ str( np.mean(np.array(acuracyMinusProportionForMajorityClass,dtype=float))))
-                print("STD for (acuracy - proportion for majority class):"+str( np.std(np.array(acuracyMinusProportionForMajorityClass,dtype=float))))
-                
+                acuracyMinusProportionForMajorityClass.append(acuracy[len(acuracy)-1]-proportionForMajorityClass)                
         print("") 
         return {"acuracy":acuracy,"acuracyMinusProportionForMajorityClass":acuracyMinusProportionForMajorityClass,"errorToApplyPCA":errorToApplyPCA}
 
@@ -121,22 +124,47 @@ if __name__ == "__main__":
     )
     cursor = mydb.cursor()
     cursor.execute("""SELECT count(*) as qtdVotes ,iduser FROM ratings 
-                      group by iduser 
-                      order by qtdVotes desc """)
+                      group by iduser """)
     users=[]
+    usersWithMoreThan3000Votes=[]
+    usersWithMoreThan2000AndLessThanOrEqualTo3000Votes=[]
+    usersWithMoreThan1000AndLessThanOrEqualTo2000Votes=[]
+    usersWithMoreThan500AndLessThanOrEqualTo1000Votes=[]
+    usersWithMoreThan250AndLessThanOrEqualTo500Votes=[]
+    usersWithMoreThan100AndLessThanOrEqualTo250Votes=[]
+    usersWithMoreThan50AndLessThanOrEqualTo100Votes=[]
+    usersWithLessThan50Votes=[]
     for qtdVotes,iduser in cursor:
         if(qtdVotes>3000):    
-            users.append(iduser)
-    shuffleUser=True
+            usersWithMoreThan3000Votes.append(iduser)
+            
+        elif(qtdVotes>2000 and qtdVotes<=3000):
+            usersWithMoreThan2000AndLessThanOrEqualTo3000Votes.append(iduser)           
+        elif(qtdVotes>1000 and qtdVotes<=2000):
+            usersWithMoreThan1000AndLessThanOrEqualTo2000Votes.append(iduser)         
+        elif(qtdVotes>500 and qtdVotes<=1000):
+            usersWithMoreThan500AndLessThanOrEqualTo1000Votes.append(iduser)            
+        elif(qtdVotes>250 and qtdVotes<=500):
+            usersWithMoreThan250AndLessThanOrEqualTo500Votes.append(iduser)            
+        elif(qtdVotes>100 and qtdVotes<=250):
+            usersWithMoreThan100AndLessThanOrEqualTo250Votes.append(iduser)     
+        elif(qtdVotes>50 and qtdVotes<=100):
+            usersWithMoreThan50AndLessThanOrEqualTo100Votes.append(iduser)
+        elif(qtdVotes<50):
+            usersWithLessThan50Votes.append(iduser)
+
+    shuffleUser=False
     
     #  users================================================   
     if(shuffleUser):
-        for i in range(len(users)*4):
-            position1ForUsersList=random.randint(0,len(users)-1)
-            position2ForUsersList=random.randint(0,len(users)-1)
-            userTemp=users[position1ForUsersList]
-            users[position1ForUsersList]=users[position2ForUsersList]
-            users[position2ForUsersList]=userTemp
+        usersWithMoreThan3000Votes=shuffleVector(usersWithMoreThan3000Votes)
+        usersWithMoreThan2000AndLessThanOrEqualTo3000Votes=shuffleVector(usersWithMoreThan2000AndLessThanOrEqualTo3000Votes)
+        usersWithMoreThan1000AndLessThanOrEqualTo2000Votes=shuffleVector(usersWithMoreThan1000AndLessThanOrEqualTo2000Votes)
+        usersWithMoreThan500AndLessThanOrEqualTo1000Votes=shuffleVector(usersWithMoreThan500AndLessThanOrEqualTo1000Votes)
+        usersWithMoreThan250AndLessThanOrEqualTo500Votes=shuffleVector(usersWithMoreThan250AndLessThanOrEqualTo500Votes)
+        usersWithMoreThan100AndLessThanOrEqualTo250Votes=shuffleVector(usersWithMoreThan100AndLessThanOrEqualTo250Votes)
+        usersWithMoreThan50AndLessThanOrEqualTo100Votes=shuffleVector(usersWithMoreThan50AndLessThanOrEqualTo100Votes)
+        usersWithLessThan50Votes=shuffleVector(usersWithLessThan50Votes)
     #end==========================================================
     knnFactory  = lambda : neighbors.KNeighborsClassifier(11)
 #    svcFactory  = lambda : SVC(gamma='scale')
@@ -144,9 +172,75 @@ if __name__ == "__main__":
     treeFactory = lambda : tree.DecisionTreeClassifier()
     MLPFactory  = lambda : MLPClassifier(solver='lbfgs', alpha=1e-5,hidden_layer_sizes=(64,128, 64), random_state=1)
     classifier=Classifier(mydb)
-    acuracyInformation=classifier.execute(treeFactory,users[:140])
+    
+    acuracyInformation=classifier.execute(treeFactory,usersWithMoreThan3000Votes[:20])
+    print("usersWithMoreThan3000Votes")
+    print("Average for acuracy:"+ str( np.mean(np.array(acuracyInformation["acuracy"],dtype=float))))
+    print("STD for acuracy:"+ str( np.std(np.array(acuracyInformation["acuracy"],dtype=float))))
+    print("Average for (acuracy - proportion for majority class):"+ str( np.mean(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+    print("STD for (acuracy - proportion for majority class):"+str( np.std(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+    print("errorToApplyPCA:"+str(acuracyInformation["errorToApplyPCA"]))
+    
+    print("==================================================================")
+    acuracyInformation=classifier.execute(treeFactory,usersWithMoreThan2000AndLessThanOrEqualTo3000Votes[:20])
+    print("usersWithMoreThan2000AndLessThanOrEqualTo3000Votes")
+    print("Average for acuracy:"+ str( np.mean(np.array(acuracyInformation["acuracy"],dtype=float))))
+    print("STD for acuracy:"+ str( np.std(np.array(acuracyInformation["acuracy"],dtype=float))))
+    print("Average for (acuracy - proportion for majority class):"+ str( np.mean(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+    print("STD for (acuracy - proportion for majority class):"+str( np.std(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+    print("errorToApplyPCA:"+str(acuracyInformation["errorToApplyPCA"]))
+    
+    print("==================================================================")    
+    acuracyInformation=classifier.execute(treeFactory,usersWithMoreThan1000AndLessThanOrEqualTo2000Votes[:20])
+    print("usersWithMoreThan1000AndLessThanOrEqualTo2000Votes")
+    print("Average for acuracy:"+ str( np.mean(np.array(acuracyInformation["acuracy"],dtype=float))))
+    print("STD for acuracy:"+ str( np.std(np.array(acuracyInformation["acuracy"],dtype=float))))
+    print("Average for (acuracy - proportion for majority class):"+ str( np.mean(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+    print("STD for (acuracy - proportion for majority class):"+str( np.std(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+    print("errorToApplyPCA:"+str(acuracyInformation["errorToApplyPCA"]))
+    
+    print("==================================================================")    
+    acuracyInformation=classifier.execute(treeFactory,usersWithMoreThan500AndLessThanOrEqualTo1000Votes[:20])
+    print("usersWithMoreThan500AndLessThanOrEqualTo1000Votes")
+    print("Average for acuracy:"+ str( np.mean(np.array(acuracyInformation["acuracy"],dtype=float))))
+    print("STD for acuracy:"+ str( np.std(np.array(acuracyInformation["acuracy"],dtype=float))))
+    print("Average for (acuracy - proportion for majority class):"+ str( np.mean(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+    print("STD for (acuracy - proportion for majority class):"+str( np.std(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+    print("errorToApplyPCA:"+str(acuracyInformation["errorToApplyPCA"]))
+    
+    
+    print("==================================================================")    
+    acuracyInformation=classifier.execute(treeFactory,usersWithMoreThan250AndLessThanOrEqualTo500Votes[:20])
+    print("usersWithMoreThan250AndLessThanOrEqualTo500Votes")
+    print("Average for acuracy:"+ str( np.mean(np.array(acuracyInformation["acuracy"],dtype=float))))
+    print("STD for acuracy:"+ str( np.std(np.array(acuracyInformation["acuracy"],dtype=float))))
+    print("Average for (acuracy - proportion for majority class):"+ str( np.mean(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+    print("STD for (acuracy - proportion for majority class):"+str( np.std(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+    print("errorToApplyPCA:"+str(acuracyInformation["errorToApplyPCA"]))
+    
+    
+    print("==================================================================")    
+    acuracyInformation=classifier.execute(treeFactory,usersWithMoreThan100AndLessThanOrEqualTo250Votes[:20])
+    print("usersWithMoreThan100AndLessThanOrEqualTo250Votes")
+    print("Average for acuracy:"+ str( np.mean(np.array(acuracyInformation["acuracy"],dtype=float))))
+    print("STD for acuracy:"+ str( np.std(np.array(acuracyInformation["acuracy"],dtype=float))))
+    print("Average for (acuracy - proportion for majority class):"+ str( np.mean(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+    print("STD for (acuracy - proportion for majority class):"+str( np.std(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+    print("errorToApplyPCA:"+str(acuracyInformation["errorToApplyPCA"]))
 
+    print("==================================================================")
+    acuracyInformation=classifier.execute(treeFactory,usersWithMoreThan50AndLessThanOrEqualTo100Votes[:20])
+    print("usersWithMoreThan50AndLessThanOrEqualTo100Votes")
+    print("Average for acuracy:"+ str( np.mean(np.array(acuracyInformation["acuracy"],dtype=float))))
+    print("STD for acuracy:"+ str( np.std(np.array(acuracyInformation["acuracy"],dtype=float))))
+    print("Average for (acuracy - proportion for majority class):"+ str( np.mean(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+    print("STD for (acuracy - proportion for majority class):"+str( np.std(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+    print("errorToApplyPCA:"+str(acuracyInformation["errorToApplyPCA"]))
 
+    
+    print("==================================================================")
+    acuracyInformation=classifier.execute(treeFactory,usersWithLessThan50Votes[:20])
+    print("usersWithLessThan50Votes")
     print("Average for acuracy:"+ str( np.mean(np.array(acuracyInformation["acuracy"],dtype=float))))
     print("STD for acuracy:"+ str( np.std(np.array(acuracyInformation["acuracy"],dtype=float))))
     print("Average for (acuracy - proportion for majority class):"+ str( np.mean(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
