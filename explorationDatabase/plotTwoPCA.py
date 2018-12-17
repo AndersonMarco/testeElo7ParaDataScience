@@ -3,7 +3,7 @@ import csv
 import matplotlib.pyplot as plt
 import mysql.connector
 mydb = mysql.connector.connect(
-  host="192.168.1.100",
+  host="localhost",
   user="root",
   passwd="123456",
   database="elo7_datascience",

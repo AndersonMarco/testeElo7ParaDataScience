@@ -16,7 +16,7 @@ import sys
 import pandas as pd
 
 mydb = mysql.connector.connect(
-  host="192.168.1.100",
+  host="localhost",
   user="root",
   passwd="123456",
   database="elo7_datascience",

@@ -14,7 +14,7 @@ from sklearn.neural_network import MLPClassifier
 
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-from sklearn.naive_bayes import GaussianNB
+
 
 def shuffleVector(vector):
     vectorT=np.copy(vector)
@@ -47,7 +47,7 @@ class Classifier:
         self.descriptorsNumber= selectInDataBase(sqlConnection, "SELECT count(*) as descriptorsNumber FROM elo7_datascience.genome_tags;" )[0]["descriptorsNumber"]
         cursor = sqlConnection.cursor()
         self.descriptorsForAllMovies={}
-        cursor.execute("SELECT idmovie,valuesdata FROM elo7_datascience.genome_scores_pca_at_one_line")
+        cursor.execute("SELECT idmovie,valuesdata FROM elo7_datascience.genome_scores_pca_at_one_line");
         for idmovie,valuesdata in cursor:
             descriptors=np.zeros(self.descriptorsNumber,dtype=np.float)
             descriptorsAtString=list(csv.reader([valuesdata]))[0]
@@ -55,24 +55,21 @@ class Classifier:
                 descriptors[j]=float(descriptorsAtString[j])
 
             self.descriptorsForAllMovies[idmovie]=descriptors
-        
 
     def execute(self,clfFactory,idUsers):
-        cursor = self.sqlConnection.cursor()
         progress=0
         acuracy=[]
         acuracyMinusProportionForMajorityClass=[]
         errorToApplyPCA=0
-        descriptorsNumber=self.descriptorsNumber
-        descriptorsNumber=384
-        timeToTrain=[]
-        timeToPredict=[]
+#        descriptorsNumber=self.descriptorsNumber
+        descriptorsNumber=64
         for iduser in idUsers:
             progress=progress+1
             #print("number of users processed: {d0}|{d1}".format(d0=progress,d1=len(idUsers)))
             sys.stdout.flush()            
             
-            sqlToKnowLinesReturned = """SELECT count(*) as nLines FROM  ratings r1                                        
+            sqlToKnowLinesReturned = """SELECT count(*) as nLines FROM  ratings r1 
+                                        inner join relation_movie_genre rg  on rg.idmovie=r1.idmovie
                                         where  r1.iduser={iduser}  order by r1.idrand """.format(iduser=iduser)        
             #print(sqlToKnowLinesReturned)                                    
             nLinesReturnedBySelect=selectInDataBase(self.sqlConnection, sqlToKnowLinesReturned)[0]["nLines"]
@@ -83,7 +80,8 @@ class Classifier:
             #                                    each line returned have the movie rate (rating) and the id for 
             #                                    the movie.
             sqlSelectAllmoviesThatAUserVoted =   """SELECT r1.idmovie,rating FROM  ratings r1 
-                                                    where  r1.iduser={iduser} """.format(iduser=iduser)
+                                                    inner join relation_movie_genre rg  on rg.idmovie=r1.idmovie
+                                                    where  r1.iduser={iduser}  order by r1.idrand """.format(iduser=iduser)
 
             cursor.execute (sqlSelectAllmoviesThatAUserVoted)
             descriptors=np.zeros((nLinesReturnedBySelect,descriptorsNumber),dtype=np.float)
@@ -92,11 +90,7 @@ class Classifier:
             for (idmovie, rating) in cursor:
                 if(idmovie in self.descriptorsForAllMovies):
                     descriptors[currentLine]=np.copy(self.descriptorsForAllMovies[idmovie])[:descriptorsNumber]
-                    if(rating>=3.0):
-                        ratings[currentLine]=1
-                    else:
-                        ratings[currentLine]=0
-                    #ratings[currentLine]=(int(float(rating)*2))        
+                    ratings[currentLine]=(int(float(rating)*2))        
                     currentLine=currentLine+1   
             
             if(currentLine==0):
@@ -107,37 +101,27 @@ class Classifier:
             descriptorsForLearningAlgorithm= descriptors
                
             kf = KFold(n_splits=4,shuffle=True,random_state=3223)
-            
+            timeToTrain=[]
+            timeToPredict=[]
             for train_index, test_index in kf.split(descriptorsForLearningAlgorithm):
             
                 X_train,X_test,  = descriptorsForLearningAlgorithm[train_index], descriptorsForLearningAlgorithm[test_index]
                 y_train,y_test  = ratings[train_index], ratings[test_index]                       
                 clf=clfFactory()
                 t1=time.time()
-                clf.fit(X_train,y_train)                
+                clf.fit(X_train,y_train)
                 t2=time.time()
                 timeToTrain.append(t2-t1)
 
-                #get acuracy to classifier make from majority class===========
-                majorityClass =float(np.bincount(np.array(np.array(y_train)*2,dtype=np.int32)).argmax())/2.0
-                acuracyTempMajorityClass=0.0
-                for i in range(len(y_test)):
-                    if(abs(y_test[i]-majorityClass)<1.0):
-                        acuracyTempMajorityClass=acuracyTempMajorityClass+1.0
-                acuracyTempMajorityClass=acuracyTempMajorityClass/float(len(y_test))
-                acuracyMinusProportionForMajorityClass.append(acuracyTempMajorityClass)
+                #get proportion for majority class in test dataset============
+                unique, counts =np.unique(y_test, return_counts=True)
+                proportionForMajorityClass=float(max(counts))/float(sum(counts))            
                 #end==========================================================
                 t1=time.time()
-                #get acuracy from model=======================================
-                acuracyTemp=0.0
-                for i in range(len(X_test)):
-                    if(abs(clf.predict([X_test[i]])[0]-y_test[i])<1.0):
-                        acuracyTemp=acuracyTemp+1.0
-                acuracy.append(acuracyTemp/float(len(X_test)))
-                #end==========================================================
+                acuracy.append(clf.score(X_test,y_test))
                 t2=time.time()
                 timeToPredict.append(t2-t1)
-                
+                acuracyMinusProportionForMajorityClass.append(acuracy[len(acuracy)-1]-proportionForMajorityClass)                
         print("") 
         return {"acuracy":acuracy,"acuracyMinusProportionForMajorityClass":acuracyMinusProportionForMajorityClass,"errorToApplyPCA":errorToApplyPCA, "timeToPredict": timeToPredict, "timeToTrain":timeToTrain}
 
@@ -195,19 +179,18 @@ if __name__ == "__main__":
         usersWithMoreThan50AndLessThanOrEqualTo100Votes=shuffleVector(usersWithMoreThan50AndLessThanOrEqualTo100Votes)
         usersWithLessThan50Votes=shuffleVector(usersWithLessThan50Votes)
     #end==========================================================
-    knnFactory  = lambda : neighbors.KNeighborsClassifier(7)
+    knnFactory  = lambda : neighbors.KNeighborsClassifier(11)
     svcFactory  = lambda : SVC(degree=3, gamma='auto', kernel='poly')
     treeFactory = lambda : tree.DecisionTreeClassifier()
     MLPFactory  = lambda : MLPClassifier(solver='lbfgs', alpha=1e-5,hidden_layer_sizes=(64,128,128, 64), random_state=1)
-    GaussianNBFactory =  lambda : GaussianNB()
+    
     classifier=Classifier(mydb)
     algorithmsToLearning=[{"name":'KNN',"algorithm":knnFactory},
                           {"name":'SVM',"algorithm":svcFactory},
                           {"name":'Arvore de decisão',"algorithm":treeFactory},
                           {"name":'Redes neurais',"algorithm":MLPFactory}
                           ]
-    algorithmsToLearning=[ {"name":'Arvore de decisão',"algorithm":treeFactory}]
-    #algorithmsToLearning=[{"name":'Gaussian',"algorithm":GaussianNBFactory}]
+
     dataSets=[{"name":"Usuários com mais do que 3000 votos","data": usersWithMoreThan3000Votes},
               {"name":"Usuários com mais do que 2000 votos e igual ou menos que 3000","data": usersWithMoreThan2000AndLessThanOrEqualTo3000Votes},
               {"name":"Usuários com mais do que 1000 votos e igual ou menos que 2000","data":usersWithMoreThan1000AndLessThanOrEqualTo2000Votes},

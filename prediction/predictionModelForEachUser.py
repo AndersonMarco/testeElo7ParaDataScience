@@ -44,27 +44,19 @@ def selectInDataBase(sqlConnection, select):
 class Classifier:
     def __init__(self,sqlConnection):
         self.sqlConnection=sqlConnection
-        self.descriptorsNumber= selectInDataBase(sqlConnection, "SELECT count(*) as descriptorsNumber FROM elo7_datascience.genome_tags;" )[0]["descriptorsNumber"]
-        cursor = sqlConnection.cursor()
-        self.descriptorsForAllMovies={}
-        cursor.execute("SELECT idmovie,valuesdata FROM elo7_datascience.genome_scores_pca_at_one_line")
-        for idmovie,valuesdata in cursor:
-            descriptors=np.zeros(self.descriptorsNumber,dtype=np.float)
-            descriptorsAtString=list(csv.reader([valuesdata]))[0]
-            for j in range(self.descriptorsNumber):
-                descriptors[j]=float(descriptorsAtString[j])
-
-            self.descriptorsForAllMovies[idmovie]=descriptors
+        
+        
+        
+        
         
 
-    def execute(self,clfFactory,idUsers):
+    def execute(self,idUsers):
         cursor = self.sqlConnection.cursor()
         progress=0
         acuracy=[]
         acuracyMinusProportionForMajorityClass=[]
         errorToApplyPCA=0
-        descriptorsNumber=self.descriptorsNumber
-        descriptorsNumber=384
+        
         timeToTrain=[]
         timeToPredict=[]
         for iduser in idUsers:
@@ -72,8 +64,9 @@ class Classifier:
             #print("number of users processed: {d0}|{d1}".format(d0=progress,d1=len(idUsers)))
             sys.stdout.flush()            
             
-            sqlToKnowLinesReturned = """SELECT count(*) as nLines FROM  ratings r1                                        
-                                        where  r1.iduser={iduser}  order by r1.idrand """.format(iduser=iduser)        
+            sqlToKnowLinesReturned = """SELECT count(*) as nLines FROM  ratings r1  
+                                        inner join movie on movie.idmovie=r1.idmovie
+                                        where  r1.iduser={iduser} and cluster is not null order by r1.idrand """.format(iduser=iduser)        
             #print(sqlToKnowLinesReturned)                                    
             nLinesReturnedBySelect=selectInDataBase(self.sqlConnection, sqlToKnowLinesReturned)[0]["nLines"]
 
@@ -82,62 +75,67 @@ class Classifier:
             #                                    a user give to a movie based on  genome metrics.
             #                                    each line returned have the movie rate (rating) and the id for 
             #                                    the movie.
-            sqlSelectAllmoviesThatAUserVoted =   """SELECT r1.idmovie,rating FROM  ratings r1 
-                                                    where  r1.iduser={iduser} """.format(iduser=iduser)
+            sqlSelectAllmoviesThatAUserVoted =   """SELECT r1.idmovie,rating, cluster FROM  ratings r1 
+                                                    inner join movie on movie.idmovie=r1.idmovie
+                                                    where  r1.iduser={iduser} and cluster is not null  order by r1.idrand""".format(iduser=iduser)
 
             cursor.execute (sqlSelectAllmoviesThatAUserVoted)
-            descriptors=np.zeros((nLinesReturnedBySelect,descriptorsNumber),dtype=np.float)
+            
             ratings=np.zeros(nLinesReturnedBySelect,dtype=np.int32)
+            clusters=np.zeros(nLinesReturnedBySelect,dtype=np.int32)
             currentLine=0 #current line for data requested from cursor
-            for (idmovie, rating) in cursor:
-                if(idmovie in self.descriptorsForAllMovies):
-                    descriptors[currentLine]=np.copy(self.descriptorsForAllMovies[idmovie])[:descriptorsNumber]
-                    if(rating>=3.0):
-                        ratings[currentLine]=1
-                    else:
-                        ratings[currentLine]=0
-                    #ratings[currentLine]=(int(float(rating)*2))        
-                    currentLine=currentLine+1   
+            for (idmovie, rating, cluster) in cursor:
+                ratings[currentLine]=int(rating*2)
+                clusters[currentLine]=cluster
+                currentLine=currentLine+1   
             
             if(currentLine==0):
                 continue
             ratings=ratings[:currentLine]
-            descriptors=descriptors[:currentLine]
+            clusters=clusters[:currentLine]
             
-            descriptorsForLearningAlgorithm= descriptors
                
             kf = KFold(n_splits=4,shuffle=True,random_state=3223)
             
-            for train_index, test_index in kf.split(descriptorsForLearningAlgorithm):
+            for train_index, test_index in kf.split(ratings):
             
-                X_train,X_test,  = descriptorsForLearningAlgorithm[train_index], descriptorsForLearningAlgorithm[test_index]
-                y_train,y_test  = ratings[train_index], ratings[test_index]                       
-                clf=clfFactory()
-                t1=time.time()
-                clf.fit(X_train,y_train)                
-                t2=time.time()
-                timeToTrain.append(t2-t1)
+                X_train_ratings,X_test_ratings  = ratings[train_index], ratings[test_index]
+                X_train_cluster,X_test_cluster  = clusters[train_index], clusters[test_index]
+                y_train_ratings,y_test_ratings  = ratings[train_index], ratings[test_index]
+                y_train_cluster,y_test_cluster  = clusters[train_index], clusters[test_index]
+                ratingsSplitByCluster={}
 
-                #get acuracy to classifier make from majority class===========
-                majorityClass =float(np.bincount(np.array(np.array(y_train)*2,dtype=np.int32)).argmax())/2.0
+                for i in range(len(X_train_cluster)):
+                    if(not(X_train_cluster[i] in ratingsSplitByCluster)):
+                        ratingsSplitByCluster[X_train_cluster[i]]=[]
+                    ratingsSplitByCluster[X_train_cluster[i]].append(X_train_ratings[i])
+
+                keysForRatingsSplitByCluster= ratingsSplitByCluster.keys()
+                modeForRatingByCluster={}
+                for key in keysForRatingsSplitByCluster:
+                    modeForRatingByCluster[key]=np.bincount(np.array(ratingsSplitByCluster[key])).argmax()
+
+                acuracyTemp=0.0
+                for i in range(len(y_test_ratings)):
+                    if(abs(modeForRatingByCluster[y_test_cluster[i]]-y_test_ratings[i])<2):
+                        acuracyTemp=acuracyTemp+1.0
+                
+                
+
+                acuracyTemp=acuracyTemp/float(len(y_test_ratings))
+                #get proportion for majority class in test dataset============
+                majorityClass =np.bincount(np.array(y_train_cluster)).argmax()
                 acuracyTempMajorityClass=0.0
-                for i in range(len(y_test)):
-                    if(abs(y_test[i]-majorityClass)<1.0):
+                for i in range(len(y_test_ratings)):
+                    if(abs(y_test_ratings[i]-majorityClass)<2):
                         acuracyTempMajorityClass=acuracyTempMajorityClass+1.0
-                acuracyTempMajorityClass=acuracyTempMajorityClass/float(len(y_test))
-                acuracyMinusProportionForMajorityClass.append(acuracyTempMajorityClass)
+                acuracyTempMajorityClass=acuracyTempMajorityClass/float(len(y_test_ratings))
                 #end==========================================================
                 t1=time.time()
-                #get acuracy from model=======================================
-                acuracyTemp=0.0
-                for i in range(len(X_test)):
-                    if(abs(clf.predict([X_test[i]])[0]-y_test[i])<1.0):
-                        acuracyTemp=acuracyTemp+1.0
-                acuracy.append(acuracyTemp/float(len(X_test)))
-                #end==========================================================
+                acuracy.append(acuracyTemp)
                 t2=time.time()
                 timeToPredict.append(t2-t1)
-                
+                acuracyMinusProportionForMajorityClass.append(acuracyTempMajorityClass)                
         print("") 
         return {"acuracy":acuracy,"acuracyMinusProportionForMajorityClass":acuracyMinusProportionForMajorityClass,"errorToApplyPCA":errorToApplyPCA, "timeToPredict": timeToPredict, "timeToTrain":timeToTrain}
 
@@ -201,12 +199,6 @@ if __name__ == "__main__":
     MLPFactory  = lambda : MLPClassifier(solver='lbfgs', alpha=1e-5,hidden_layer_sizes=(64,128,128, 64), random_state=1)
     GaussianNBFactory =  lambda : GaussianNB()
     classifier=Classifier(mydb)
-    algorithmsToLearning=[{"name":'KNN',"algorithm":knnFactory},
-                          {"name":'SVM',"algorithm":svcFactory},
-                          {"name":'Arvore de decisão',"algorithm":treeFactory},
-                          {"name":'Redes neurais',"algorithm":MLPFactory}
-                          ]
-    algorithmsToLearning=[ {"name":'Arvore de decisão',"algorithm":treeFactory}]
     #algorithmsToLearning=[{"name":'Gaussian',"algorithm":GaussianNBFactory}]
     dataSets=[{"name":"Usuários com mais do que 3000 votos","data": usersWithMoreThan3000Votes},
               {"name":"Usuários com mais do que 2000 votos e igual ou menos que 3000","data": usersWithMoreThan2000AndLessThanOrEqualTo3000Votes},
@@ -216,21 +208,20 @@ if __name__ == "__main__":
               {"name":"Usuários com mais do que 100 votos e igual ou menos que 250","data":usersWithMoreThan100AndLessThanOrEqualTo250Votes},
               {"name":"Usuários com mais do que 50 votos e igual ou menos que 100","data":usersWithMoreThan50AndLessThanOrEqualTo100Votes},
               {"name":"Usuários com menos do que 50","data":usersWithLessThan50Votes}]
-    for algorithmToLearning in algorithmsToLearning:
-        print("==================================================================")
-        print("nome do algoritmo:"+algorithmToLearning['name'])
+    
+    print("==================================================================")
 
-        for dataSet in dataSets:
+    for dataSet in dataSets:
 
-            acuracyInformation=classifier.execute(algorithmToLearning["algorithm"],dataSet["data"][:20])            
-            print(dataSet["name"]+":")
-            print("    Média para acurácia:"+ str( np.mean(np.array(acuracyInformation["acuracy"],dtype=float))))
-            print("    Desvio padrão para acurácia:"+ str( np.std(np.array(acuracyInformation["acuracy"],dtype=float))))
-            print("    Média para (acuracia - porcentagem da classe majoritária):"+ str( np.mean(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
-            print("    Desvio padrão  (acurácia - porcentagem da classe majoritária):"+str( np.std(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
-            print("    Média tempo para treinar  (s):"+str( np.mean(np.array(acuracyInformation["timeToTrain"],dtype=float))))
-            print("    Desvio padrão do tempo para treinar (s):"+str( np.std(np.array(acuracyInformation["timeToTrain"],dtype=float))))
-            print("    Média tempo para testar modelo  (s):"+str( np.mean(np.array(acuracyInformation["timeToPredict"],dtype=float))))
-            print("    Desvio padrão do tempo para testar modelo (s):"+str( np.std(np.array(acuracyInformation["timeToPredict"],dtype=float))))
+        acuracyInformation=classifier.execute(dataSet["data"][:20])            
+        print(dataSet["name"]+":")
+        print("    Média para acurácia:"+ str( np.mean(np.array(acuracyInformation["acuracy"],dtype=float))))
+        print("    Desvio padrão para acurácia:"+ str( np.std(np.array(acuracyInformation["acuracy"],dtype=float))))
+        print("    Média para (acuracia - porcentagem da classe majoritária):"+ str( np.mean(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+        print("    Desvio padrão  (acurácia - porcentagem da classe majoritária):"+str( np.std(np.array(acuracyInformation["acuracyMinusProportionForMajorityClass"],dtype=float))))
+        #print("    Média tempo para treinar  (s):"+str( np.mean(np.array(acuracyInformation["timeToTrain"],dtype=float))))
+        #print("    Desvio padrão do tempo para treinar (s):"+str( np.std(np.array(acuracyInformation["timeToTrain"],dtype=float))))
+        print("    Média tempo para testar modelo  (s):"+str( np.mean(np.array(acuracyInformation["timeToPredict"],dtype=float))))
+        print("    Desvio padrão do tempo para testar modelo (s):"+str( np.std(np.array(acuracyInformation["timeToPredict"],dtype=float))))
         print("==================================================================")
     
